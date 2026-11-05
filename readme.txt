@@ -6,9 +6,9 @@ RESTful API ด้วย Python + FastAPI แสดงรายงานสถ�
 
 1. URL สำหรับตรวจงาน
 --------------------
-API     : https://<ชื่อโปรเจกต์>.vercel.app/api/zoo-visitors
-Swagger : https://<ชื่อโปรเจกต์>.vercel.app/docs
-GitHub  : https://github.com/<username>/<repo>
+API     : https://backend-t-karn-zoo-api-66122519037.vercel.app/api/zoo-visitors
+Swagger : https://backend-t-karn-zoo-api-66122519037.vercel.app/docs
+GitHub  : https://github.com/yutthajak-git/Backend-T.karn-Zoo-api-66122519037
 
 
 2. แหล่งข้อมูล
@@ -26,6 +26,10 @@ Resource ID  : 0ecc96cf-d914-42a1-b184-dbbd013c3c9c
      เพื่อรับชื่อไฟล์ วันที่แก้ไขล่าสุด และ URL ดาวน์โหลด
   2) ดาวน์โหลดไฟล์ XLSX จริงจาก URL ที่ได้
   3) อ่านชีต "statistics" ด้วย openpyxl แล้วส่งกลับเป็น JSON โดยใช้ชื่อคอลัมน์ตามไฟล์ต้นฉบับ
+  4) ถ้าเรียกสดไม่สำเร็จ จะอ่านจากสำเนาไฟล์จริงของ resource เดียวกันในโฟลเดอร์ data/ แทน
+     (ดาวน์โหลดจาก data.go.th ไว้แล้ว ไฟล์ตรงกับต้นฉบับทุกไบต์)
+     เหตุผล: data.go.th อยู่หลัง Cloudflare และตอบ 403 Forbidden กับ request จากเซิร์ฟเวอร์
+     ต่างประเทศ เช่น Vercel แต่เรียกจากเครื่องในประเทศไทยได้ปกติ
 
 หมายเหตุ: ไม่ใช้ datastore_search เพราะ Datastore ของ resource นี้มีเฉพาะชีตคำอธิบาย
 (Data Dictionary) ไม่มีตัวเลขสถิติ
@@ -38,13 +42,14 @@ GET /docs               Swagger UI ของ FastAPI
 
 โครงสร้าง JSON
   source       แหล่งที่มาของข้อมูล (หน่วยงาน, ชุดข้อมูล, resource id, ชื่อไฟล์, URL, วันที่แก้ไขล่าสุด)
+    retrieved_from  "live" = เรียกสดจาก data.go.th
+                    "local_copy" = อ่านจากสำเนาไฟล์จริงใน data/ (มี live_error บอกสาเหตุที่เรียกสดไม่ได้)
   fiscal_year  ปีงบประมาณ (2569)
   total        จำนวนรายการ
   records      รายการสถิติ แต่ละรายการมี รายการ, สวนสัตว์, ปีงบประมาณ และจำนวนผู้เข้าชมรายเดือน
                ต.ค. 68 - ก.ย. 69
 
 ค่า null = เดือนที่ยังไม่มีข้อมูลในไฟล์ (ไฟล์นี้เป็นรายงานถึงเดือน ก.ค. 69 จึงยังไม่มี ส.ค.-ก.ย. 69)
-ถ้าดึงข้อมูลจาก data.go.th ไม่สำเร็จ API จะตอบ HTTP 502 พร้อมข้อความแจ้งสาเหตุ
 
 
 4. ตัวอย่าง JSON Response (ตัดมา 2 รายการแรก)
@@ -59,7 +64,8 @@ GET /docs               Swagger UI ของ FastAPI
     "resource_name": "ข้อมูลรายงานสถิติจำนวนผู้เข้าชมสวนสัตว์ อสส กรกฎาคม 2569",
     "resource_url": "https://data.go.th/dataset/970c2632-1669-44aa-80c5-2c20cb2295e4/resource/0ecc96cf-d914-42a1-b184-dbbd013c3c9c/download/-.-..69.xlsx",
     "last_modified": "2026-08-11T10:31:06.429240",
-    "sheet": "statistics"
+    "sheet": "statistics",
+    "retrieved_from": "live"
   },
   "fiscal_year": 2569,
   "total": 63,
@@ -105,7 +111,7 @@ GET /docs               Swagger UI ของ FastAPI
 5. การทดสอบด้วย Postman
 -----------------------
 Method   : GET
-URL      : https://<ชื่อโปรเจกต์>.vercel.app/api/zoo-visitors
+URL      : https://backend-t-karn-zoo-api-66122519037.vercel.app/api/zoo-visitors
 ผลที่ได้ : Status 200 OK และ JSON ตามหัวข้อที่ 4
 (ภาพหน้าจอผลทดสอบแนบมาพร้อมงาน)
 
@@ -115,6 +121,8 @@ URL      : https://<ชื่อโปรเจกต์>.vercel.app/api/zoo-vis
 main.py           โค้ด FastAPI
 requirements.txt  รายการ dependencies (fastapi[standard], httpx, openpyxl)
 readme.txt        ไฟล์นี้
+data/0ecc96cf-d914-42a1-b184-dbbd013c3c9c.xlsx  สำเนาไฟล์จริงของ resource จาก data.go.th
+data/resource_show.json                          metadata ของ resource จาก data.go.th API
 
 
 7. วิธีติดตั้งและรันบนเครื่อง (Windows PowerShell)
@@ -131,4 +139,5 @@ fastapi dev main.py
 -------------
 Deploy บน Vercel โดย import repository จาก GitHub
 Vercel ตรวจพบ FastAPI จาก main.py และติดตั้ง dependencies จาก requirements.txt ให้อัตโนมัติ
-ไม่ต้องตั้ง Build Command
+ไม่ต้องตั้ง Build Command และไม่ต้องตั้ง Environment Variables
+บน Vercel ผลลัพธ์จะเป็น "retrieved_from": "local_copy" เพราะ data.go.th ปฏิเสธ request จากเซิร์ฟเวอร์ต่างประเทศ
