@@ -1,7 +1,9 @@
+import json
 from io import BytesIO
+from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from openpyxl import load_workbook
 
 CKAN_API = "https://data.go.th/api/3/action"
@@ -10,6 +12,12 @@ RESOURCE_ID = "0ecc96cf-d914-42a1-b184-dbbd013c3c9c"  # ไฟล์ XLSX รา
 SHEET = "statistics"
 FISCAL_YEAR = 2569
 
+# สำเนาไฟล์จริงของ resource เดียวกัน (ดาวน์โหลดจาก data.go.th ไว้) ใช้เมื่อเรียกสดไม่ได้
+# เพราะ data.go.th ตอบ 403 กับ request จากเซิร์ฟเวอร์ต่างประเทศ เช่น Vercel
+DATA_DIR = Path(__file__).parent / "data"
+LOCAL_META = DATA_DIR / "resource_show.json"
+LOCAL_XLSX = DATA_DIR / f"{RESOURCE_ID}.xlsx"
+
 app = FastAPI(
     title="Zoo Visitors API",
     description="สถิติจำนวนผู้เข้าชมสวนสัตว์ ปีงบประมาณ 2569 "
@@ -17,33 +25,40 @@ app = FastAPI(
 )
 
 
-def fetch_resource():
-    """ถาม data.go.th ว่าไฟล์อยู่ที่ไหน แล้วดาวน์โหลด XLSX มาอ่านชีต statistics"""
+def fetch_live():
+    """ถาม data.go.th ว่าไฟล์อยู่ที่ไหน แล้วดาวน์โหลด XLSX"""
     meta = httpx.get(f"{CKAN_API}/resource_show", params={"id": RESOURCE_ID}, timeout=30)
     meta.raise_for_status()
     meta = meta.json()["result"]
 
     file = httpx.get(meta["url"], timeout=60, follow_redirects=True)
     file.raise_for_status()
+    return meta, file.content
 
-    sheet = load_workbook(BytesIO(file.content), read_only=True, data_only=True)[SHEET]
+
+def read_statistics(xlsx):
+    """อ่านชีต statistics โดยใช้ชื่อคอลัมน์ตามไฟล์จริง"""
+    sheet = load_workbook(BytesIO(xlsx), read_only=True, data_only=True)[SHEET]
     rows = sheet.iter_rows(values_only=True)
     headers = next(rows)
-    records = [
-        {h: v for h, v in zip(headers, row) if h is not None}  # ใช้ชื่อคอลัมน์ตามไฟล์จริง
+    return [
+        {h: v for h, v in zip(headers, row) if h is not None}
         for row in rows
         if row[0] is not None
     ]
-    return meta, records
 
 
 @app.get("/api/zoo-visitors")
 def zoo_visitors():
     try:
-        meta, records = fetch_resource()
+        meta, xlsx = fetch_live()
+        retrieval = {"retrieved_from": "live"}
     except (httpx.HTTPError, KeyError) as e:
-        raise HTTPException(status_code=502, detail=f"ดึงข้อมูลจาก data.go.th ไม่สำเร็จ: {e}")
+        meta = json.loads(LOCAL_META.read_text(encoding="utf-8"))["result"]
+        xlsx = LOCAL_XLSX.read_bytes()
+        retrieval = {"retrieved_from": "local_copy", "live_error": str(e).splitlines()[0]}
 
+    records = read_statistics(xlsx)
     return {
         "source": {
             "organization": "องค์การสวนสัตว์แห่งประเทศไทย ในพระบรมราชูปถัมภ์",
@@ -55,6 +70,7 @@ def zoo_visitors():
             "resource_url": meta["url"],
             "last_modified": meta.get("last_modified"),
             "sheet": SHEET,
+            **retrieval,
         },
         "fiscal_year": FISCAL_YEAR,
         "total": len(records),
